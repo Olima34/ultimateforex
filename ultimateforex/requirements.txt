@@ -1,0 +1,6 @@
+pandas
+requests
+schedule
+lxml
+html5lib
+beautifulsoup4

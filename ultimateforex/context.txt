@@ -1,0 +1,178 @@
+# FOREX COPY ULTIMATE V1 - PROJECT CONTEXT
+
+## PROJECT OVERVIEW
+This is a forex trading signal generation system that:
+- Fetches economic indicators from Trading Economics website
+- Calculates forex pair scores based on macroeconomic surprise factors
+- Stores historical data for backtesting and analysis
+- Provides trading signals by ranking currency pairs
+
+## CORE FUNCTIONALITY
+1. **Data Collection**: Scrapes economic indicators (GDP, inflation, interest rates, etc.) from 8 major countries
+2. **Scoring Algorithm**: Compares actual vs consensus/forecast values to generate +1/-1 scores
+3. **Pair Calculation**: Subtracts quote country score from base country score for each forex pair
+4. **Historical Storage**: Maintains complete timeline of all pair scores for backtesting
+
+## TECHNICAL ARCHITECTURE
+- **Language**: Python 3.13
+- **Database**: SQLite (simple, efficient for this scale)
+- **Main Libraries**: pandas, requests, sqlite3
+- **Update Frequency**: 5-minute cycles, only when indicators are due (using next_update_ts logic)
+- **Data Volume**: ~190 records per update cycle, designed to handle millions of historical records
+- **Code Organization**: Modular, with clear separation: `country_indicators.py`, `pair_scores.py`, `pair_total_score.py`, and a simple `main.py` runner
+- **Consistent DB Connection Style**: All modules use constants for DB paths and dedicated connect functions for maintainability
+
+## DATABASE SCHEMA (Current Structure)
+```sql
+-- Hierarchical country-indicator tables (one per combination)
+-- Example: countries_united_states_gdp_growth, countries_euro_area_interest_rate, etc.
+CREATE TABLE countries_{country}_{indicator} (
+    id INTEGER PRIMARY KEY,
+    reference TEXT NOT NULL,
+    release_ts INTEGER,
+    actual REAL,
+    previous REAL,
+    consensus REAL,
+    forecast REAL,
+    next_update_ts INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Hierarchical pair-indicator tables (one per combination)  
+-- Example: pairs_EURUSD_gdp_growth, pairs_GBPJPY_interest_rate, etc.
+CREATE TABLE pairs_{pair}_{indicator} (
+    id INTEGER PRIMARY KEY,
+    score REAL NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pair total score tables (one per pair)
+-- Example: pairs_EURUSD_total_score
+CREATE TABLE pairs_{pair}_total_score (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pair TEXT,
+    total_score REAL,
+    indicator_scores TEXT,
+    indicator_row_ids TEXT
+);
+```
+
+## LOGIC IMPLEMENTATION
+
+### Indicators Storage System:
+- **Structure**: `COUNTRIES` -> `COUNTRY` -> `INDICATOR` tables
+- **Tables**: One table per country-indicator combination (e.g., `countries_united_states_gdp_growth`)
+- **Update Logic**: 
+  - Get last row from each indicator table
+  - If `next_update_ts` is null or overdue, fetch new data
+  - If `next_update_ts` was null: Overwrite (delete + insert)
+  - If `next_update_ts` was overdue: Add new row (historical data)
+
+### Pairs Storage System:
+- **Structure**: `PAIRS` -> `PAIR` -> `INDICATOR` tables  
+- **Tables**: One table per pair-indicator combination (e.g., `pairs_EURUSD_gdp_growth`)
+- **Update Logic**:
+  - When country indicator is refreshed, calculate new pair scores
+  - Score = base_country_score - quote_country_score
+  - Only save new row if score differs from last saved score
+  - Maintains complete historical timeline of score changes
+
+### Pair Total Score System:
+- **Structure**: One table per pair (e.g., `pairs_EURUSD_total_score`)
+- **Logic**:
+  - Sums all indicator scores for each pair
+  - Stores total score, all indicator scores, and their row ids
+  - Uses auto-incremented id for update tracking (no timestamp column)
+  - Only updates when any indicator row id changes
+
+### Score Calculation Logic:
+- **Basic**: actual > consensus/forecast = +1, actual < consensus/forecast = -1
+- **Bad indicators**: Unemployment scores inverted (higher unemployment = worse = -1 when increasing)
+- **Pair score**: Difference between base and quote country scores for each indicator
+- **Change detection**: Only store new scores when they differ from previous values
+- **Total score**: Sum of all individual indicator scores per pair
+
+## USER PREFERENCES & CODING STYLE
+
+### Variable Naming Philosophy
+- **Balance**: Descriptive but not verbose
+- **Examples**: `indicators_data` not `items`, `for indicator in indicators` not `for i in items`
+- **Table names**: Simple (`pairs` not `pair_scores`, `indicators` not `economic_indicators`)
+- **Function names**: Concise (`get_latest()` not `get_latest_pair_scores_values()`)
+- **Full words**: `column` not `col`, `difference` not `diff`
+
+### Code Complexity Preferences
+- **Prioritizes simplicity and maintainability** over complex optimization
+- **Avoids overwhelming error handling** - prefers clean code over verbose try/catch blocks
+- **Values readable variable names** that make code self-documenting
+- **Prefers straightforward logic** over micro-optimizations
+
+### Performance Philosophy
+- **"Good enough" approach**
+- **Reliability over speed**
+- **Scalability mindset**
+
+## PRIMARY USE CASES
+1. **Trading Signals**: Real-time pair rankings by total_score for trading decisions
+2. **Historical Analysis**: Complete timeline of pair scores for backtesting strategies
+3. **Dashboard Display**: Simple data visualization (planned Streamlit interface)
+
+## FUTURE EXPANSION PLANS
+- **Additional data sources**: Carry rates, Commitment of Traders (COT), seasonality patterns
+- **Web interface**: Simple Streamlit dashboard for data visualization
+- **Enhanced scoring**: More sophisticated algorithms based on backtesting results
+- **New tables planned**: carry_data, cot_data, seasonality_patterns
+
+## DATA SOURCES & EXTERNAL DEPENDENCIES
+- **Primary source**: Trading Economics website (tradingeconomics.com)
+- **Rate limiting**: 1-second delays between API calls
+- **Error handling**: Simple logging, continues on individual failures
+- **User-Agent**: Mozilla/5.0 to avoid blocking
+
+## UPDATE LOGIC & SCHEDULING
+- **Smart updates**: Only fetches when next_update_ts indicates new data available
+- **Background operation**: Runs continuously, updating every 5 minutes
+- **Graceful degradation**: System continues if some indicators fail to update
+- **Database safety**: Uses transactions, context managers for connection handling
+
+## KEY IMPLEMENTATION DECISIONS MADE
+1. **Hierarchical table structure**: Separate tables for each country-indicator and pair-indicator combination
+2. **Smart update logic**: Only stores new data when values actually change
+3. **Historical preservation**: Maintains complete timeline when indicators transition from null to scheduled updates
+4. **Optimized storage**: Each table contains only relevant data
+5. **Change-based scoring**: Pair scores only saved when they differ from previous values
+6. **Consistent DB connection style**: All modules use constants for DB paths and dedicated connect functions
+7. **No timestamp in total score tables**: Uses auto-incremented id for update tracking
+
+## USER'S EXPLICIT REQUIREMENTS
+- **Historical data retention**: Keep ALL pair scores forever
+- **No complex backtesting logic**: Prefers to export all data to pandas DataFrame for analysis
+- **Update timing**: Must be updated 5-10 minutes after new indicator releases
+- **Simplicity priority**: Values clean, maintainable code over complex features
+- **Dashboard approach**: Will start with simple Streamlit, may enhance later
+
+## TECHNICAL CONSTRAINTS & PREFERENCES
+- **Database choice**: SQLite is sufficient
+- **Error handling**: Minimal, clean approach
+- **Code organization**: Modular structure with clear separation of concerns
+- **Update frequency**: Current 5-minute cycle meets requirements
+- **Data export**: Prefers full database dumps to pandas for analysis
+
+## SCORING ALGORITHM DETAILS
+- **Basic logic**: actual > consensus/forecast = +1, actual < consensus/forecast = -1
+- **Bad indicators**: Unemployment rate scores are inverted (higher = worse)
+- **Pair calculation**: base_country_score - quote_country_score
+- **Total score**: Sum of all individual indicator scores per pair
+
+## OPERATIONAL CHARACTERISTICS
+- **Countries tracked**: 8 (US, EU, UK, Japan, Canada, Australia, New Zealand, Switzerland)
+- **Indicators per country**: 7 (GDP, interest rates, unemployment, inflation, trade balance, current account, retail sales)
+- **Forex pairs**: 27 major pairs
+- **Expected data volume**: ~190 new records per update cycle
+- **Storage projection**: Can run for decades without storage issues
+
+## RECENT CODEBASE CHANGES
+- **All modules now use DB path constants and connect functions for consistency**
+- **last_update_ts removed from total score tables; id is used for update tracking**
+- **File order and structure standardized for maintainability**
+- **main.py runs all update modules in sequence for full pipeline refresh**
